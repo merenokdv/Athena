@@ -11,6 +11,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+import httpx
 from langchain_ollama import ChatOllama, OllamaEmbeddings
 from langchain_community.vectorstores import Chroma
 
@@ -71,6 +72,11 @@ _STOP = {
     "заметки",
     "заметка",
     "расскажи",
+    "расскажешь",
+    "расскажите",
+    "скажи",
+    "скажешь",
+    "скажите",
     "дай",
     "пожалуйста",
     "нужно",
@@ -85,6 +91,9 @@ _STOP = {
     "посмотри",
     "рекомендуй",
     "посоветуй",
+    "знаешь",
+    "знаете",
+    "расскажешь",
 }
 
 
@@ -99,9 +108,14 @@ def _keywords(question: str) -> list[str]:
     words = re.findall(r"[a-zA-Zа-яА-ЯёЁ0-9]+", question.lower())
     out: list[str] = []
     for w in words:
-        if len(w) < 3 or w in _STOP:
+        if w in _STOP:
             continue
-        out.append(w)
+        # латиница 2+ (ip, ui, ci, db…) и кириллица 3+
+        is_latin = bool(re.fullmatch(r"[a-z0-9]+", w))
+        if is_latin and len(w) >= 2:
+            out.append(w)
+        elif not is_latin and len(w) >= 3:
+            out.append(w)
     return out
 
 
@@ -156,20 +170,41 @@ def _keyword_score(doc, keywords: list[str]) -> float:
     src = f"{doc.metadata.get('filename', '')} {doc.metadata.get('source', '')}"
     src_words = _tokens(src)
     body_words = _tokens(doc.page_content or "")
+    fname = Path(doc.metadata.get("filename") or "").stem.lower()
     score = 0.0
     for kw in keywords:
+        # точное совпадение имени файла (ip.md ← «ip») — максимальный буст
+        if fname == kw or fname.startswith(f"{kw}.") or fname.startswith(f"{kw}_") or fname.startswith(f"{kw}-"):
+            score += 50.0
         if any(_stems_match(kw, w) for w in src_words):
             score += 10.0
-        # в теле — реже, чтобы не забивать шумными совпадениями
         body_hits = sum(1 for w in body_words if _stems_match(kw, w))
         if body_hits:
-            score += min(3.0, 0.4 * body_hits)
+            score += min(4.0, 0.5 * body_hits)
     return score
 
 
 def _filename_keys_match(key: str, keywords: list[str]) -> bool:
     words = _tokens(key)
     return any(_stems_match(kw, w) for kw in keywords for w in words)
+
+
+def _ollama_unload(*models: str) -> None:
+    """Выгрузить модели из VRAM Ollama. 27B и embed на 24 ГБ не помещаются вместе."""
+    base = OLLAMA_BASE_URL.rstrip("/")
+    targets = [m for m in models if m]
+    try:
+        with httpx.Client(timeout=120.0) as client:
+            if not targets:
+                ps = client.get(f"{base}/api/ps").json()
+                for item in ps.get("models") or []:
+                    name = item.get("name") or item.get("model")
+                    if name:
+                        targets.append(name)
+            for name in dict.fromkeys(targets):
+                client.post(f"{base}/api/generate", json={"model": name, "keep_alive": 0})
+    except Exception:
+        pass
 
 
 class RagAssistant:
@@ -211,26 +246,61 @@ class RagAssistant:
                 scored.append((hits, id_list))
         scored.sort(key=lambda x: x[0], reverse=True)
 
+        # по 1–2 чанка с файла — иначе один большой .md забьёт пул
         ids: list[str] = []
         for _hits, id_list in scored:
-            ids.extend(id_list)
-            if len(ids) >= limit * 4:
+            ids.extend(id_list[:2])
+            if len(ids) >= limit * 6:
                 break
         if not ids:
             return []
-        ids = ids[: limit * 4]
+        ids = ids[: limit * 6]
         got = self.vectorstore._collection.get(ids=ids, include=["metadatas", "documents"])
         docs = []
         for meta, text in zip(got["metadatas"], got["documents"]):
             docs.append(Document(page_content=text or "", metadata=meta or {}))
         return docs
 
+    @staticmethod
+    def _diverse_top(candidates: list, k: int, max_per_source: int = 2):
+        """Топ-k с лимитом чанков на один файл — больше разных заметок в контексте."""
+        selected = []
+        per_src: dict[str, int] = {}
+        leftover = []
+        for doc, score in candidates:
+            src = str(doc.metadata.get("source") or doc.metadata.get("filename") or id(doc))
+            n = per_src.get(src, 0)
+            if n >= max_per_source:
+                leftover.append((doc, score))
+                continue
+            per_src[src] = n + 1
+            selected.append(doc)
+            if len(selected) >= k:
+                return selected
+        for doc, _ in leftover:
+            selected.append(doc)
+            if len(selected) >= k:
+                break
+        return selected
+
     def retrieve(self, question: str, k: int = TOP_K):
         """Гибридный retrieve: vector top-N → реранк по ключам/имени файла."""
+        # 27B занимает почти всю 3090 — перед embed выгружаем LLM
+        _ollama_unload(LLM_MODEL)
+
         keywords = _keywords(question)
         pool = max(k * 5, 20)
 
-        paired = self.vectorstore.similarity_search_with_relevance_scores(question, k=pool)
+        try:
+            paired = self.vectorstore.similarity_search_with_relevance_scores(question, k=pool)
+        except Exception:
+            _ollama_unload()
+            paired = self.vectorstore.similarity_search_with_relevance_scores(question, k=pool)
+
+        # отдельные поиски по коротким тех. ключам (ip, vpn, ci…) — semantic часто промахивается
+        for kw in keywords:
+            if len(kw) <= 4:
+                paired += self.vectorstore.similarity_search_with_relevance_scores(kw, k=pool)
 
         if keywords:
             short_q = " ".join(keywords[:4])
@@ -257,8 +327,7 @@ class RagAssistant:
                 candidates.append((doc, 20.0 + _keyword_score(doc, keywords)))
 
         candidates.sort(key=lambda x: x[1], reverse=True)
-        return [d for d, _ in candidates[:k]]
-
+        return self._diverse_top(candidates, k, max_per_source=2)
     def index_stats(self) -> dict:
         """Только метаданные индекса (пути/счётчики), без чтения текста заметок."""
         raw = self.vectorstore._collection.get(include=["metadatas"])
@@ -323,6 +392,8 @@ class RagAssistant:
             context_parts.append(f"[{i}] Источник: {label}\n{doc.page_content}")
 
         context = "\n\n".join(context_parts)
+        # перед генерацией выгружаем embed — место под 27B
+        _ollama_unload(EMBED_MODEL, f"{EMBED_MODEL}:latest")
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {

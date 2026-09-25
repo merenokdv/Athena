@@ -53,11 +53,16 @@ def health():
 
 @app.post("/api/ask", response_model=AskResponse)
 def ask(body: AskRequest):
-    result = get_assistant().ask(body.question.strip(), k=TOP_K)
-    # только basename источников — меньше шума в UI, без лишних путей
-    sources = []
-    for s in result.sources:
-        sources.append(Path(s).name)
+    try:
+        result = get_assistant().ask(body.question.strip(), k=TOP_K)
+    except Exception as exc:  # noqa: BLE001
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=503,
+            detail=f"Ошибка генерации (часто нехватка VRAM: 27B и embed по очереди). {exc}",
+        ) from exc
+    sources = [Path(s).name for s in result.sources]
     return AskResponse(answer=result.answer, sources=sources, model=LLM_MODEL)
 
 

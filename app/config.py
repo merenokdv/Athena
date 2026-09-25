@@ -38,8 +38,8 @@ MAX_FILE_BYTES = 8 * 1024 * 1024
 
 # --- Ollama ---
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
-# Качество: qwen3.5:27b (нужна ~16–22 ГБ VRAM). Скорость: qwen3.5:9b
-LLM_MODEL = os.environ.get("ATHENA_LLM", "qwen3.5:27b")
+# По умолчанию 9b (быстрее, меньше VRAM). Качество: ATHENA_LLM=qwen3.5:27b
+LLM_MODEL = os.environ.get("ATHENA_LLM", "qwen3.5:9b")
 EMBED_MODEL = os.environ.get("ATHENA_EMBED", "nomic-embed-text")
 
 # --- Чанкинг ---
@@ -47,7 +47,7 @@ CHUNK_SIZE = 900
 CHUNK_OVERLAP = 150
 
 # --- Retrieval ---
-TOP_K = 4
+TOP_K = 8
 
 # --- Генерация ---
 TEMPERATURE = 0.2

@@ -69,8 +69,14 @@ form.addEventListener("submit", async (e) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ question: q }),
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`;
+      try {
+        const err = await res.json();
+        if (err?.detail) detail = typeof err.detail === "string" ? err.detail : JSON.stringify(err.detail);
+      } catch (_) {}
+      throw new Error(detail);
+    }    const data = await res.json();
     pending.classList.remove("pending");
     pending.querySelector(".msg-body").textContent = data.answer || "Пустой ответ";
     if (data.sources?.length) {
