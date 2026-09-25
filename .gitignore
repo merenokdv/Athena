@@ -1,0 +1,38 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Local RAG index & runtime data (rebuild with ingest)
+data/chroma/
+data/*
+!data/.gitkeep
+
+# Secrets / local env
+.env
+.env.*
+
+# Personal knowledge bases — NEVER commit notes
+medevl/
+notes/
+vault/
+**/_pdf_converted/
+
+# Logs and local eval dumps
+docs/*_console.log
+docs/test_run_raw.json
+docs/ingest_*.log
+*.log
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Optional large local models cache
+models/

@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Athena</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="atmosphere" aria-hidden="true"></div>
+
+    <header class="top">
+      <div class="brand">Athena</div>
+      <div class="meta" id="modelMeta">local · notes</div>
+    </header>
+
+    <main class="stage">
+      <section class="hero" id="hero">
+        <h1 class="hero-brand">Athena</h1>
+        <p class="hero-line">Мудрость из ваших заметок.</p>
+      </section>
+
+      <section class="thread" id="thread" hidden></section>
+    </main>
+
+    <footer class="composer-wrap">
+      <form class="composer" id="form" autocomplete="off">
+        <input
+          id="input"
+          type="text"
+          name="q"
+          placeholder="Спросите по заметкам…"
+          maxlength="4000"
+          required
+        />
+        <button type="submit" id="send" aria-label="Отправить">
+          <span>Ask</span>
+        </button>
+      </form>
+      <p class="hint">Отвечает только по локальной базе · источники под ответом</p>
+    </footer>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
