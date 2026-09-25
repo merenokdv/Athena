@@ -25,16 +25,19 @@ ollama pull nomic-embed-text
 git clone git@github.com:merenokdv/Athena.git
 cd Athena
 
+# один скрипт: venv (если нужно) → Ollama → модели → индекс → UI
+./start.sh
+# откроется http://127.0.0.1:7860  (или откройте сами)
+```
+
+Вручную то же самое:
+
+```bash
 python3 -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
+source .venv/bin/activate
 pip install -r requirements.txt
-
-# индекс демо-документов
 PYTHONPATH=. python -m app.ingest
-
-# UI
 bash scripts/run_ui.sh
-# → http://127.0.0.1:7860
 ```
 
 Проверка покрытия индекса:

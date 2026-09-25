@@ -62,12 +62,15 @@ def ask(body: AskRequest):
 
 
 def main() -> None:
+    import os
     import uvicorn
 
+    host = os.environ.get("ATHENA_HOST", "127.0.0.1")
+    port = int(os.environ.get("ATHENA_PORT", "7860"))
     uvicorn.run(
         "app.server:app",
-        host="127.0.0.1",
-        port=7860,
+        host=host,
+        port=port,
         reload=False,
         log_level="info",
     )
