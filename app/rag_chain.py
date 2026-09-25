@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
 
 from langchain_ollama import ChatOllama, OllamaEmbeddings
 from langchain_community.vectorstores import Chroma
@@ -19,6 +20,7 @@ from app.config import (
     EMBED_MODEL,
     ENABLE_THINKING,
     KEEP_ALIVE,
+    KNOWLEDGE_DIRS,
     LLM_MODEL,
     NUM_CTX,
     OLLAMA_BASE_URL,
@@ -30,6 +32,13 @@ from app.prompts import SYSTEM_PROMPT, USER_TEMPLATE
 _GREETING_RE = re.compile(
     r"^(привет|здравствуй(те)?|добрый\s+(день|вечер|утро)|hello|hi|hey)[!?.]*$",
     re.IGNORECASE | re.UNICODE,
+)
+
+# Вопросы про размер/статус индекса — отвечаем из метаданных, без RAG по тексту
+_META_STATS_RE = re.compile(
+    r"(сколько|какое\s+количество|число|размер|статистик|покрыти)."
+    r"{0,60}(замет|документ|файл|чанк|вектор|индекс|баз[аеы]|knowledge|notes)",
+    re.IGNORECASE | re.UNICODE | re.DOTALL,
 )
 
 _STOP = {
@@ -250,6 +259,22 @@ class RagAssistant:
         candidates.sort(key=lambda x: x[1], reverse=True)
         return [d for d, _ in candidates[:k]]
 
+    def index_stats(self) -> dict:
+        """Только метаданные индекса (пути/счётчики), без чтения текста заметок."""
+        raw = self.vectorstore._collection.get(include=["metadatas"])
+        sources: set[str] = set()
+        for meta in raw.get("metadatas") or []:
+            src = (meta or {}).get("source")
+            if src:
+                sources.add(str(src))
+        return {
+            "files": len(sources),
+            "chunks": self.vectorstore._collection.count(),
+            "kb": [str(p) for p in KNOWLEDGE_DIRS],
+            "model": LLM_MODEL,
+            "collection": COLLECTION_NAME,
+        }
+
     def ask(self, question: str, k: int = TOP_K) -> RagAnswer:
         q = question.strip()
         if _GREETING_RE.match(q):
@@ -257,6 +282,24 @@ class RagAssistant:
                 answer=(
                     "Привет! Я Athena — персональный ассистент по вашей базе знаний (RAG + локальная Qwen). "
                     "Задайте вопрос по загруженным документам — отвечу по найденным источникам."
+                ),
+                sources=[],
+                context_preview="",
+            )
+
+        if _META_STATS_RE.search(q):
+            stats = self.index_stats()
+            kb = ", ".join(stats["kb"]) if stats["kb"] else "—"
+            return RagAnswer(
+                answer=(
+                    f"В индексе сейчас:\n"
+                    f"• файлов (уникальных источников): **{stats['files']}**\n"
+                    f"• чанков (фрагментов для поиска): **{stats['chunks']}**\n"
+                    f"• коллекция: `{stats['collection']}`\n"
+                    f"• модель ответов: `{stats['model']}`\n"
+                    f"• база: `{kb}`\n\n"
+                    "Это метаданные индекса, не «угадывание» по тексту заметок. "
+                    "После обновления файлов пересоберите индекс: `python -m app.ingest`."
                 ),
                 sources=[],
                 context_preview="",
@@ -275,7 +318,9 @@ class RagAssistant:
         for i, doc in enumerate(docs, start=1):
             src = doc.metadata.get("source", "unknown")
             sources.append(src)
-            context_parts.append(f"[{i}] Источник: {src}\n{doc.page_content}")
+            # в промпт — только имя файла, без полного пути
+            label = Path(src).name
+            context_parts.append(f"[{i}] Источник: {label}\n{doc.page_content}")
 
         context = "\n\n".join(context_parts)
         messages = [
